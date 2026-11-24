@@ -1,0 +1,49 @@
+name: Build and deploy PHP Docker Compose
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create SSH key
+        run: |
+          echo "${{ secrets.SERVER_PRIVATE_SSH_KEY }}" > key.pem
+          chmod 600 key.pem
+
+      # 🆕 Crear carpeta destino si no existe
+      - name: Create folder on server
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} \
+            "mkdir -p /home/${{ secrets.SERVER_USER }}/php-app"
+
+      - name: Create TAR package
+        run: |
+          tar -cf project.tar docker-compose.yml Dockerfile src
+
+      - name: Upload files to server (manual SCP)
+        run: |
+          scp -o StrictHostKeyChecking=no -i key.pem project.tar \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/home/${{ secrets.SERVER_USER }}/php-app/project.tar
+
+      - name: Deploy on server (manual SSH)
+        run: |
+          ssh -o StrictHostKeyChecking=no -i key.pem \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }} \
+            '
+              cd /home/'"${{ secrets.SERVER_USER }}"'/php-app &&
+              tar -xf project.tar &&
+              echo "Pull imágenes base..." &&
+              sudo docker-compose pull || true &&
+              echo "Reconstruyendo contenedores..." &&
+              sudo docker-compose up -d --build --force-recreate &&
+              echo "✅ Aplicación PHP desplegada correctamente."
+            '
